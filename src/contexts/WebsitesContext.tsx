@@ -1,7 +1,9 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { ref, onValue, push, set, update, remove, increment } from 'firebase/database';
+import { ref, onValue, push, set, update, remove, get } from 'firebase/database';
 import { database } from '../services/firebase';
 import { Website, SortOption, WebsiteFormData } from '../types';
+import { getDeviceId } from '../utils/deviceId';
+import toast from 'react-hot-toast';
 
 interface WebsitesContextProps {
   websites: Website[];
@@ -103,9 +105,11 @@ export const WebsitesProvider: React.FC<{ children: ReactNode }> = ({ children }
       };
       
       await set(newWebsiteRef, newWebsite);
+      toast.success('Website added successfully! 🎉');
       return newWebsiteRef.key || '';
     } catch (err) {
       console.error('Error adding website:', err);
+      toast.error('Failed to add website');
       throw new Error('Failed to add website');
     }
   };
@@ -115,8 +119,10 @@ export const WebsitesProvider: React.FC<{ children: ReactNode }> = ({ children }
     try {
       const websiteRef = ref(database, `websites/${id}`);
       await update(websiteRef, websiteData);
+      toast.success('Website updated successfully! ✨');
     } catch (err) {
       console.error('Error updating website:', err);
+      toast.error('Failed to update website');
       throw new Error('Failed to update website');
     }
   };
@@ -125,9 +131,13 @@ export const WebsitesProvider: React.FC<{ children: ReactNode }> = ({ children }
   const deleteWebsite = async (id: string): Promise<void> => {
     try {
       const websiteRef = ref(database, `websites/${id}`);
+      const viewsRef = ref(database, `websiteViews/${id}`);
       await remove(websiteRef);
+      await remove(viewsRef); // Also remove view tracking data
+      toast.success('Website deleted successfully');
     } catch (err) {
       console.error('Error deleting website:', err);
+      toast.error('Failed to delete website');
       throw new Error('Failed to delete website');
     }
   };
@@ -135,8 +145,28 @@ export const WebsitesProvider: React.FC<{ children: ReactNode }> = ({ children }
   // Increment visit count
   const incrementVisitCount = async (id: string): Promise<void> => {
     try {
-      const websiteRef = ref(database, `websites/${id}/visitCount`);
-      await update(websiteRef, increment(1));
+      const deviceId = getDeviceId();
+      const viewRef = ref(database, `websiteViews/${id}/${deviceId}`);
+      
+      // Check if this device has already viewed this website
+      const snapshot = await get(viewRef);
+      
+      if (!snapshot.exists()) {
+        // First time viewing from this device
+        await set(viewRef, {
+          timestamp: new Date().toISOString(),
+          deviceId
+        });
+        
+        // Get current visit count and increment
+        const websiteRef = ref(database, `websites/${id}`);
+        const websiteSnapshot = await get(websiteRef);
+        
+        if (websiteSnapshot.exists()) {
+          const currentCount = websiteSnapshot.val().visitCount || 0;
+          await update(websiteRef, { visitCount: currentCount + 1 });
+        }
+      }
     } catch (err) {
       console.error('Error incrementing visit count:', err);
     }
